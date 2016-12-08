@@ -1,0 +1,23 @@
+#!/bin/env perl
+use strict;
+
+my @data;
+while(<STDIN>) {
+  chomp;
+  if (!/^\#/) {
+    if (/^\/\//) {
+      my $str;
+      for my $val (@data) {
+        $str .= "$val\t";
+      }
+      chop($str);
+      print "$str\n";
+      undef(@data);
+    }
+    
+    my ($label, $value) = split /\s+/, $_;
+    push @data, $value;
+    
+  }
+}
+

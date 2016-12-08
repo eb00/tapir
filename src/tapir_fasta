@@ -1,0 +1,366 @@
+#!/usr/bin/env perl
+
+#----------------------------------------------
+# Tapir - target prediction for plant microRNAs
+#
+# This version is using the FASTA engine
+#
+# written by erbon 2008-2009
+#----------------------------------------------
+
+use strict;
+use Bio::SearchIO;
+use RNA;
+use Getopt::Long;
+
+
+# score cutoff default value
+my $SCORE = 3.5;
+# free energy ratio cutoff default value
+my $MFE = 0.7;
+# miRNA file
+my $mir_file;
+# target file
+my $target_file;
+
+
+# check number of arguments and print usage
+if (@ARGV == 0) {
+  print "Usage $0 options\n";
+  print "--mir_file mir fasta file\n";
+  print "--target_file target fasta file\n";
+  print "--score <value> score cutoff\n";
+  print "--mfe <value> mfe ratio cutoff\n";
+  exit;
+}
+
+
+# parse options
+GetOptions ("score=f" => \$SCORE,
+            "mfe_ratio=f" => \$MFE,
+            "mir_file=s" => \$mir_file,
+            "target_file=s" => \$target_file);
+
+# FASTA program path
+my $FASTA_PATH = "fasta34";
+
+# output formatting option
+my $TAB_PRINT = "false";
+
+# create temporary fasta file name
+my $fasta_file = "_fasta" . ($$ + time);
+
+# build fasta command line
+my $fasta_cmd = "$FASTA_PATH -q -n -E 150 $mir_file $target_file 1 > $fasta_file";
+
+# do fasta search
+my $ret = system($fasta_cmd);
+if ($ret != 0) {
+  print STDERR "\nAn error occured during the fasta search\nStop.\n";
+  unlink($fasta_file);
+  exit;
+}
+
+# parse & process fasta search
+my $searchio = new Bio::SearchIO (-format => 'fasta', -file => $fasta_file);
+
+# print parameters 
+print "# Search options\n";
+print "# miRNA file $mir_file\n";
+print "# target file $target_file\n";
+print "# score <= $SCORE\n";
+print "# mfe ratio >= $MFE\n";
+print "#\n";
+
+# main loop, parse all FASTA results.
+while (my $result = $searchio->next_result()) {
+
+  my $query_name = $result->query_name();
+
+  while(my $hit = $result->next_hit) {
+    my $hit_name = $hit->name();
+    my $hit_len = $hit->length();
+    while (my $hsp = $hit->next_hsp) {
+
+      # get start and stop for hit
+      my $start = $hsp->start('hit');
+      #my $stop = $hsp->end('hit');
+
+      # alignement is padded with blanks ex. "    ATGCGACAG"
+      # calculate delta value = blanks
+      my $delta = 0;
+      my $len = 0;
+      my @qstr = split //,$hsp->query_string;
+      for (my $i=0;$i<(@qstr);$i++) {
+        if ($qstr[$i] eq " ") {
+          $delta++;
+        }
+      }
+      $len = length($hsp->query_string) - $delta;
+
+      # extract alignments strings (query, alignment, hit)
+      my $alq = substr($hsp->query_string,$delta,$len);
+      my $alh = substr($hsp->hit_string,$delta,$len);
+      my $als = substr($hsp->homology_string,$delta,$len);
+
+      # hit start coordinate starts at the first aligned nucleotide
+      # so there can be a gap between the start of the sequence alignment
+      # and the real start coordinate
+      $delta = 0;
+      my @al_string = split //,$als;
+      for (my $i=0;$i<(@al_string);$i++) {
+        if ($al_string[$i] eq " ") {
+          $delta++;
+        }
+        else {
+          last;
+        }
+      }
+      $start = $start - $delta;
+
+      # compute score
+      my ($gap,$seed_gap,$gu,$seed_gu,$match,$mismatch,$seed_mismatch,$score,$aln_str) = score($alq,$alh);
+      my $all_gaps = $gap + $seed_gap;
+
+      # check aln strand, score cutoff and gaps
+      #if ($hsp->strand('query') == -1 && $score <= $SCORE && $all_gaps <= $GAPMAX) {
+      if ($hsp->strand('query') == -1 && $score <= $SCORE) {
+
+        # format alignement strings RNA like
+        my $q_rna = $alq;
+        my $h_rna = $alh;
+        # revcomp query
+        $q_rna =~ tr/('A','T','G','C')/('T','A','C','G')/;
+        $q_rna =~ s/T/U/g;
+        $h_rna =~ s/T/U/g;
+
+        # compute mfe ratio
+        my $mfe_ratio = check_mfe($alq,$alh);
+
+
+        # check mfe ratio cutoff
+        if ($mfe_ratio >= $MFE) { 
+
+          $mfe_ratio = sprintf("%.2f",$mfe_ratio);
+
+          if ($TAB_PRINT eq "true") {
+            print "$query_name\t";
+            print "$hit_name\t";
+            print "$gap\t";
+            print "$mismatch\t";
+            print "$gu\t";
+            print "$score\t";
+            print "$mfe_ratio\t";
+            print "$q_rna\t$aln_str\t$h_rna\t";
+            print "$start\t";
+            print "$hit_len\t";
+            print "$seed_gap\t";
+            print "$seed_mismatch\t";
+            print "$seed_gu";
+            print "\n";
+          }
+          else {
+            print "miRNA         $query_name\n";
+            print "target        $hit_name\n";
+            print "score         $score\n";
+            print "mfe_ratio     $mfe_ratio\n";
+            print "start         $start\n";
+            print "seed_gap      $seed_gap\n";
+            print "seed_mismatch $seed_mismatch\n";
+            print "seed_gu       $seed_gu\n";
+            print "gap           $gap\n";
+            print "mismatch      $mismatch\n";
+            print "gu            $gu\n";
+            print "miRNA_3'      $q_rna\n";
+            print "aln           $aln_str\n";
+            print "target_5'     $h_rna\n";
+            print "//\n";
+          }
+        }
+      }
+    }
+  }
+}
+
+# remove temporary fasta file 
+unlink($fasta_file);
+
+# compute the score given the query alignment string (alq)
+# and the hit alignment string (alh)
+# return gap, gu, match, mismatch and reformatted alignment string
+sub score {
+    my ($alq,$alh) = @_;
+
+    # alignment length
+    my $len = length($alq);
+    # convert query and hit to arrays
+    my @q = split //,$alq; 
+    my @h = split //,$alh;
+    # reformatted alignment string
+    my $a;
+    # number of gaps
+    my $gap = 0;
+    # alignment matches
+    my $match = 0;
+    # alignment mismatches
+    my $mismatch = 0;
+    # number of GU pairs
+    my $gu = 0;
+    # score
+    my $score;
+
+    # seed parameters
+    my $seed_gap = 0;
+    my $seed_mismatch = 0;
+    my $seed_gu = 0;
+    my $seed_start = 0;
+    my $seed_stop = 0;
+
+    # Define seed region on alignment string, taking into account gaps
+    get_upper_lower($alq,\$seed_start,\$seed_stop,2,12);
+
+    # Calculate score and reformat alignment string 
+    for (my $i=0;$i<$len;$i++) {
+
+      # gaps
+      if ($q[$i] eq "-" || $h[$i] eq "-") {
+        if ($i >= $seed_start && $i <= $seed_stop) {
+          $seed_gap++;
+        }
+        else {
+          $gap++;
+        }
+        $a .= ".";
+      }
+      # matches
+      elsif ($q[$i] eq $h[$i]) {
+        $match++;
+        $a .= "|";
+      }
+      # GU pairs (query is reverse complemented)
+      elsif (($q[$i] eq "A" && $h[$i] eq "G") || ($q[$i] eq "C" && $h[$i] eq "T")) {
+        if ($i >= $seed_start && $i <= $seed_stop) {
+          $seed_gu++;
+        }
+        else {
+          $gu++;
+        }
+        $a .= "o";
+      }
+      # mismatches
+      else {
+        if ($i >= $seed_start && $i <= $seed_stop) {
+          $seed_mismatch++;
+        }
+        else {
+          $mismatch++;
+        }
+        $a .= ".";
+      }
+    }
+
+    # compute the score 
+    $score = $gap + $mismatch + ($seed_mismatch * 2) + ($seed_gap * 2) + $seed_gu + ($gu * 0.5);
+
+    return($gap,$seed_gap,$gu,$seed_gu,$match,$mismatch,$seed_mismatch,$score,$a);
+}
+
+# compute mfe ratio for a given alignment
+# return ratio value
+sub check_mfe {
+  my ($alq,$alh) = @_;
+  my $revmir = $alq;
+  $revmir =~ s/-//g;
+  my $mir = $revmir;
+  revcomp(\$mir);
+
+  my $hit = $alh;
+  $hit =~ s/-//g;
+
+  my ($mfe1,$st1) = constraint_fold(\$mir,\$revmir);
+  my ($mfe2,$st2) = constraint_fold(\$mir,\$hit);
+
+  my $ratio = $mfe2/$mfe1;
+  return($ratio);
+}
+
+# compute mfe for artificial construct of mir and target
+# returns mfe
+sub constraint_fold {
+    
+  my ($refmir,$reftarget) = @_;
+
+  my $linker = "GCGGGGACGC";    # small loop = linker
+  my $linker_cs = "(((xxxx)))"; # constraint linker structure
+
+  my $mir_cs;     # mir constraint
+  my $target_cs;  # target constraint
+  my $construct;  # sequence construct
+  my $constraint; # constraints string
+  my $structure;  # folded structure
+  my $mfe = 0;    # minimum free energy
+
+  # build sequence construct with mir, linker, target
+  $construct = $$refmir . $linker . $$reftarget;
+  $construct = uc($construct);
+  $construct =~ s/T/U/g;
+  #print $construct,"\n";
+
+  # build construct constraint
+  for (my $i=0;$i<length($$refmir);$i++) {
+    $mir_cs .= ".";
+  }
+
+  for (my $i=0;$i<length($$reftarget);$i++) {
+   $target_cs .= ".";
+  }
+
+  $constraint = $mir_cs . $linker_cs . $target_cs;
+
+  # force constrained folding
+  $RNA::fold_constrained = 1;
+  #$RNA::noGU = 1;
+  
+  ($structure,$mfe) = RNA::fold($construct,$constraint);
+  #print "$structure\n";
+
+  return($mfe,$structure);
+}
+
+
+# set the seed coordinates on the query mir alignment string
+# take into account gaps
+# return values are set in the ref variables
+sub get_upper_lower {
+  # get query (miRNA) alignment string, return start and stop refs, seed region values
+  my ($s,$startref,$stopref,$limit1,$limit2) = @_;
+  my $l = length($s);
+  $l--;
+  my $index = 0;
+  $$startref = -1;
+  $$stopref = -1;
+  
+  for (my $i=$l;$i>=0;$i--) {
+    my $letter = substr($s,$i,1);
+    if ($letter ne "-") {
+      $index++;
+    }
+    if ($index == $limit1 && $$stopref == -1) {
+      $$stopref = $i;
+    }
+    if ($index == $limit2 && $$startref == -1) {
+      $$startref = $i;
+    }
+  }
+}
+
+# reverse complement a sequence
+# input sequence ref
+# return 1 if ok
+sub revcomp {
+  my ($seqref)=@_;
+  $$seqref = reverse(split //,$$seqref);
+  $$seqref =~ tr/('A','T','G','C')/('T','A','C','G')/;
+  return(1);
+}
+

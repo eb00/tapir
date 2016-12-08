@@ -1,0 +1,63 @@
+#!/usr/bin/env perl
+
+# just a wrapper for RNAhybrid
+# determine the maximum length for the target sequence
+# and launch the command
+
+use strict;
+
+if (@ARGV != 2) {
+  print "Usage: $0 <mir_file> <target_file>\n";
+  exit();
+}
+
+my $hybrid_engine = "trh";
+
+my $cmd = "$hybrid_engine -u 5 -b 10 -d 2.38,0.19 -c ";
+
+# miRNA file name
+my $mir_file = $ARGV[0];
+# target file name
+my $target_file = $ARGV[1];
+
+# determine max target length
+my %f;
+fasta2hash("$target_file",\%f);
+my $max = 0;
+foreach my $k (keys %f) {
+  my $l = length($f{$k});
+  if ($l > $max) {
+    $max = $l;
+  }
+} 
+undef(%f);
+
+$cmd .= "-m $max -q $mir_file -t $target_file ";
+#print STDERR "$cmd\n";
+
+open(F,"$cmd |");
+while(<F>) {
+  print;
+}
+
+# fasta file to hash
+# input  filename, hash reference
+# return 1 success
+sub fasta2hash {
+  my ($file,$hashref)=@_;
+  my $key;
+    open (IN,$file)||die "can't open file $file\n";
+    while (<IN>) {
+        chomp;
+        if (/^>(\S+)/) {
+            $key=$1;
+         }
+        else {
+            s/\s+//g;
+            $$hashref{$key}.=uc($_);
+         }
+     }
+    close IN;
+return(1);
+}
+

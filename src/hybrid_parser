@@ -1,0 +1,339 @@
+#!/usr/bin/env perl
+#----------------------------------------
+#
+# parse rna hybrid output
+#
+# look for miRNA targets and target mimics
+#
+# written by erbon 
+#----------------------------------------
+
+use strict;
+use Getopt::Long;
+
+my $MIMIC = 0;
+my $MFE_RATIO = 0.7;
+my $SCORE = 4;
+my $HELP = 0;
+
+# parse options
+GetOptions ("mimic=i" => \$MIMIC,
+            "score=f" => \$SCORE,
+            "help" => \$HELP,
+            "mfe_ratio=f" => \$MFE_RATIO);
+
+# check number of arguments and print usage
+if ($HELP == 1) {
+  print "Usage $0 options\n";
+  print "--mimic <1> search for target mimics (default 0)\n";
+  print "--score <value> score cutoff (default 4)\n";
+  print "--mfe <value> mfe ratio cutoff (default 0.7)\n";
+  exit;
+}
+
+# header with options values
+print "# Search options\n";
+print "# mimic = $MIMIC\n";
+if ($MIMIC == 0) {
+  print "# score <= $SCORE\n";
+}
+print "# mfe_ratio >= $MFE_RATIO\n";
+print "#\n";
+
+
+# parse rna hybrid tabular format
+while(<STDIN>) {
+  chomp;
+
+  # parse rna-hybrid output
+  my @d = split /:/, $_;
+  
+  my $target_id = $d[0];          # target ID
+  my $mir_id = $d[2];             # mir ID
+  my $mfe = $d[4];                # duplex free energy
+  my $start_position = $d[6];     # start position on target sequence
+  my $target_upper = $d[7];       # target upper string
+  my $target_lower = $d[8];       # target lower string
+  my $mir_lower = $d[9];          # mirna lower string
+  my $mir_upper = $d[10];         # mirna upper string
+  my $mfe_ratio = $d[11];         # duplex free energy ratio
+
+  if ($mfe_ratio > 1) {
+    $mfe_ratio = 1;
+  }
+
+  # convert whitespaces to dots
+  $target_upper =~ s/\s/\./g;
+  $target_lower  =~ s/\s/\./g;
+  $mir_lower  =~ s/\s/\./g;
+  $mir_upper  =~ s/\s/\./g;
+
+  # convert strings to arrays
+  my @tu = split //, $target_upper;
+  my @tl = split //, $target_lower;
+  my @ml = split //, $mir_lower;
+  my @mu = split //, $mir_upper;
+
+  # alignment string length
+  my $len = scalar(@tu);
+
+  # consensus strings for target and mirna
+  my $str_target;
+  my $str_mir;
+
+  # build consensus strings by comparing upper and lower alignment strings
+  for (my $i=0;$i<$len;$i++) {
+    if ($tu[$i] eq "." && $tl[$i] eq ".") {
+      $str_target .= "-";
+    }
+    if ($tu[$i] eq "." && $tl[$i] ne ".") {
+      $str_target .= $tl[$i];
+    }
+    if ($tu[$i] ne "." && $tl[$i] eq ".") {
+      $str_target .= $tu[$i];
+    }
+    if ($mu[$i] eq "." && $ml[$i] eq ".") {
+      $str_mir .= "-";
+    }
+    if ($mu[$i] eq "." && $ml[$i] ne ".") {
+      $str_mir .= $ml[$i];
+    }
+    if ($mu[$i] ne "." && $ml[$i] eq ".") {
+      $str_mir .= $mu[$i];
+    }
+  }
+
+  my $seed_start = 2;
+  my $seed_stop = 12;
+
+  my @st = split //, $str_target;
+  my @sm = split //, $str_mir;
+
+  my $idx;
+  $idx = $len - 1;
+
+  # determine exact mir start and stop index on alignment string
+  my $mir_start;
+  my $mir_stop;
+
+  while ($sm[$idx] eq '-') {
+    $idx--;
+  }
+  $mir_stop = $idx;
+
+  $idx = 0;
+  while($sm[$idx] eq '-') {
+    $idx++;
+  }
+  $mir_start = $idx;
+
+  # define seed start and stop index on the mir alignment string
+  my $idx_seed_start;
+  my $idx_seed_stop;
+
+  $idx = 0;
+  for (my $i=$mir_stop;$i>=$mir_start;$i--) {
+    if ($sm[$i] ne '-') {
+      $idx++;
+    }
+    if ($idx == $seed_start) {
+      $idx_seed_stop = $i;
+      last;
+    }
+  }
+
+  $idx = 0;
+  for (my $i=$mir_stop;$i>=$mir_start;$i--) {
+    if ($sm[$i] ne '-') {
+      $idx++;
+    }
+    if ($idx == $seed_stop) {
+      $idx_seed_start = $i;
+      last;
+    }
+  }
+
+  # extract substring corresponding to miR positions
+  my $substr_target;
+  my $substr_mir;
+  for (my $i=$mir_start;$i<=$mir_stop;$i++) {
+    $substr_target .= $st[$i];
+    $substr_mir .= $sm[$i];
+  }
+ 
+  if ($MIMIC == 1) {
+    my $check = check_mimic(\@sm, \@st, $mir_start, $mir_stop);
+    if ($check == 1) {
+      my ($gap, $mismatch, $gu, $seed_gap, $seed_mismatch, $seed_gu, $aln_str) = 
+        full_score(\@sm, \@st, $mir_start, $mir_stop, $idx_seed_start, $idx_seed_stop);
+      
+      my $all_gaps = $gap + $seed_gap;
+      my $all_gu = $gu + $seed_gu;
+      my $all_mismatch = $mismatch + $seed_mismatch;
+
+      if ($mfe_ratio >= $MFE_RATIO) {
+        print "miRNA     $mir_id\n";
+        print "target    $target_id\n";
+        print "mfe       $mfe\n";
+        print "mfe ratio $mfe_ratio\n";
+        print "start     $start_position\n";
+        print "gap       $all_gaps\n";
+        print "mismatch  $all_mismatch\n";
+        print "GU        $all_gu\n";
+        print "miRNA_3'  $substr_mir\n";
+        print "aln       $aln_str\n";
+        print "target_5' $substr_target\n";
+        print "//\n"; 
+      }
+    }
+  }
+  else {
+    
+    my ($gap, $mismatch, $gu, $seed_gap, $seed_mismatch, $seed_gu, $aln_str) = full_score(\@sm, \@st, $mir_start, $mir_stop, $idx_seed_start, $idx_seed_stop);
+    my $score = $gap + $mismatch + $gu * 0.5 + $seed_gap * 2 + $seed_mismatch * 2 + $seed_gu;
+
+    if ($mfe_ratio >= $MFE_RATIO && $score <= $SCORE) {
+      print "miRNA          $mir_id\n";
+      print "target         $target_id\n";
+      print "score          $score\n";
+      print "mfe            $mfe\n";
+      print "mfe_ratio      $mfe_ratio\n";
+      print "start          $start_position\n";
+      print "gap            $gap\n";
+      print "mismatch       $mismatch\n";
+      print "GU             $gu\n";
+      print "seed_gap       $seed_gap\n";
+      print "seed_mismatch  $seed_mismatch\n";
+      print "seed_GU        $seed_gu\n";
+      print "miRNA_3'       $substr_mir\n";
+      print "aln            $aln_str\n";
+      print "target_5'      $substr_target\n";
+      print "//\n";
+    }
+  }
+}
+
+# count GU, gaps, mismatches in seed and non-seed regions
+sub full_score {
+
+  my ($smref, $stref, $mir_start, $mir_stop, $idx_seed_start, $idx_seed_stop) = @_;
+  my $gap = 0;
+  my $mismatch = 0;
+  my $gu = 0;
+  my $seed_gap = 0;
+  my $seed_mismatch = 0;
+  my $seed_gu = 0;
+  my $aln_str = "";
+
+  for (my $i=$mir_start;$i<=$mir_stop;$i++) {
+    # check gaps
+    if ($$smref[$i] eq '-' || $$stref[$i] eq '-') {
+      if ($i >= $idx_seed_start && $i <= $idx_seed_stop) {
+        $seed_gap++;
+      }
+      else {
+        $gap++;
+      }
+      $aln_str .= '.';
+    }
+    # matches
+    elsif (($$smref[$i] eq 'A' && $$stref[$i] eq 'U') || 
+           ($$smref[$i] eq 'U' && $$stref[$i] eq 'A') ||
+           ($$smref[$i] eq 'G' && $$stref[$i] eq 'C') ||
+           ($$smref[$i] eq 'C' && $$stref[$i] eq 'G')) {
+
+             $aln_str .= '|';
+    }
+    # GU pairs
+    elsif (($$smref[$i] eq 'G' && $$stref[$i] eq 'U') ||
+           ($$smref[$i] eq 'U' && $$stref[$i] eq 'G')) {
+           if ($i >= $idx_seed_start && $i <= $idx_seed_stop) {
+             $seed_gu++;
+           }
+           else {
+             $gu++;
+           }
+           $aln_str .= 'o';
+    }
+    # mismatches
+    else {
+      if ($i >= $idx_seed_start && $i <= $idx_seed_stop) {
+        $seed_mismatch++;
+      }
+      else {
+        $mismatch++;
+      }
+      $aln_str .= '.';
+    }
+  }
+ return ($gap, $mismatch, $gu, $seed_gap, $seed_mismatch, $seed_gu, $aln_str);
+}
+
+# check for target mimicry pattern
+sub check_mimic {
+  my ($smref, $stref, $mir_start, $mir_stop) = @_;
+  
+  my $ret = 0;
+  
+  my $idx_pos10;
+  my $idx_pos11;
+
+  my $idx = 0;
+  for (my $i=$mir_stop;$i>=$mir_start;$i--) {
+    if ($$smref[$i] ne '-') {
+      $idx++;
+    }
+    if ($idx == 10) {
+      $idx_pos11 = $i;
+      last;
+    }
+  }
+  $idx = 0;
+  for (my $i=$mir_stop;$i>=$mir_start;$i--) {
+    if ($$smref[$i] ne '-') {
+      $idx++;
+    }
+    if ($idx == 11) {
+      $idx_pos10 = $i;
+      last;
+    }
+  }
+
+  # check that we have 3 residues between position 10 and 11
+  if ($idx_pos11 - $idx_pos10 != 4) {
+    return($ret);
+  }
+
+  # check that position 10 and 11 are paired 
+  # check watson-crick + GU
+  my @pos = ($idx_pos11, $idx_pos10);
+  my $count_pos = 0;
+  for my $p (@pos) {
+    if (($$smref[$p] eq 'G' && $$stref[$p] eq 'C') ||
+        ($$smref[$p] eq 'C' && $$stref[$p] eq 'G') ||
+        ($$smref[$p] eq 'A' && $$stref[$p] eq 'U') ||
+        ($$smref[$p] eq 'U' && $$stref[$p] eq 'A') ||
+        ($$smref[$p] eq 'G' && $$stref[$p] eq 'U') ||
+        ($$smref[$p] eq 'U' && $$stref[$p] eq 'G') ) {
+
+          $count_pos++;
+     }
+   }
+   if ($count_pos != 2) {
+     return($ret);
+   }
+
+  # check that we have 3 gaps between positions 10 and 11
+  my $ct = 0;
+  for (my $i=$idx_pos10+1;$i<$idx_pos11;$i++) {
+    if ($$smref[$i] eq '-') {
+      $ct++;
+    }
+  }
+
+  if ($ct == 3) {
+    $ret = 1;
+  }
+
+  return($ret);
+}
