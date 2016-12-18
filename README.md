@@ -29,7 +29,7 @@ It is described in the paper "TAPIR, a web server for the prediction of plant mi
 
 
 ## Search with the FASTA engine (fast search)
-
+```
 Usage tapir_fasta [options]
     --mir_file mir fasta file
     --target_file target fasta file
@@ -39,14 +39,13 @@ Usage tapir_fasta [options]
 Example:
     tapir_fasta --mir_file 163.fa --target_file AT1G66720.fa 
     tapir_fasta --score 2 --mfe_ratio 0.6 --mir_file 163.fa --target_file AT1G66720.fa
-
-
-
+```
 
 ## Search with the RNAhybrid engine (precise search)
 
 The search is done in two steps. First running the RNAhybrid program and second parse the raw results. The two steps can be combined by creating a pipe, or done separately. The reason for having two steps is that the RNAhybrid search is quite slow. This step can be parallelized on a cluster, using the first command.
 
+```
 RNAhybrid raw results
 
 Usage: tapir_hybrid <mir_file> <target_file>
@@ -59,7 +58,7 @@ Usage hybrid_parser [options]
    --mfe <value> mfe ratio cutoff (default 0.7)
 
 The option mimic toggles the search for target mimics. The only possible option is to play with the mfe_ratio value.
-```
+
    Example:
    tapir_hybrid 399a.fa IPS1.fa | hybrid_parser --mimic 1 
    tapir_hybrid 399a.fa IPS1.fa | hybrid_parser --mimic 1 --mfe_ratio 0.6
