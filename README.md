@@ -4,12 +4,10 @@ tapir is a software for the prediction of plant microRNA targets.
 
 It is described in the paper "TAPIR, a web server for the prediction of plant microRNA targets, including target mimics" by Bonnet et al., published in [Bioinformatics](http://bioinformatics.oxfordjournals.org/content/26/12/1566.abstract).
   
-## Fee
-
-The usage of this program is free of charge for academics and nonprofit organizations. For any commercial usage, please contact the authors.
 
 
 ## Installation
+
 
      This distribution is for Linux based machines only.
 
@@ -30,44 +28,38 @@ The usage of this program is free of charge for academics and nonprofit organiza
 
 
 
+## Search with the FASTA engine (fast search)
 
- ## Search with the FASTA engine (fast search)
-
-    Usage tapir_fasta [options]
+Usage tapir_fasta [options]
     --mir_file mir fasta file
     --target_file target fasta file
     --score <value> score cutoff
     --mfe <value> mfe ratio cutoff
 
-    Example:
+Example:
     tapir_fasta --mir_file 163.fa --target_file AT1G66720.fa 
     tapir_fasta --score 2 --mfe_ratio 0.6 --mir_file 163.fa --target_file AT1G66720.fa
 
 
 
 
- ## Search with the RNAhybrid engine (precise search)
+## Search with the RNAhybrid engine (precise search)
 
-   The search is done in two steps. First running the RNAhybrid program and
-   second parse the raw results. The two steps can be combined by creating a
-   pipe, or done separately. The reason for having two steps is that the
-   RNAhybrid search is quite slow. This step can be parallelized on a cluster,
-   using the first command.
+The search is done in two steps. First running the RNAhybrid program and second parse the raw results. The two steps can be combined by creating a pipe, or done separately. The reason for having two steps is that the RNAhybrid search is quite slow. This step can be parallelized on a cluster, using the first command.
 
-   * RNAhybrid raw results
+RNAhybrid raw results
 
-   Usage: tapir_hybrid <mir_file> <target_file>
+Usage: tapir_hybrid <mir_file> <target_file>
 
-   * Parsing the results
+Parsing the results
 
-   Usage hybrid_parser [options]
+Usage hybrid_parser [options]
    --mimic <1> search for target mimics (default 0)
    --score <value> score cutoff (default 4)
    --mfe <value> mfe ratio cutoff (default 0.7)
 
-   The option mimic toggles the search for target mimics. The only possible
-   option is to play with the mfe_ratio value.
-
+The option mimic toggles the search for target mimics. The only possible option is to play with the mfe_ratio value.
+```
    Example:
    tapir_hybrid 399a.fa IPS1.fa | hybrid_parser --mimic 1 
    tapir_hybrid 399a.fa IPS1.fa | hybrid_parser --mimic 1 --mfe_ratio 0.6
@@ -78,8 +70,7 @@ The usage of this program is free of charge for academics and nonprofit organiza
    Example:
    tapir_hybrid 163.fa AT1G66720.fa | hybrid_parser
    tapir_hybrid 163.fa AT1G66720.fa | hybrid_parser --score 2 --mfe_ratio 0.6
-
-
+```
 
 
 ## Output examples
@@ -176,4 +167,7 @@ I made very small modifications of the source code to get extra output parameter
   
   http://bioinformatics.oxfordjournals.org/content/26/12/1566.abstract
 
+## Fee
+
+The usage of this program is free of charge for academics and nonprofit organizations. For any commercial usage, please contact the authors.
 
